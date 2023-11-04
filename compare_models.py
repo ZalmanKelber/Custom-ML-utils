@@ -41,10 +41,10 @@ class ModelComparer:
         self.clean_names(probs=True)
     
     def evaluatate_hard_voting(self, splits: int = 1, tiebreak: int = 1, scoring: str = 'accuracy') -> pd.DataFrame:
-        return self._get_scores(self, splits=splits, tiebreak=tiebreak, scoring=scoring, probs=False)
+        return self._get_scores(splits=splits, tiebreak=tiebreak, scoring=scoring, probs=False)
     
     def evaluatate_soft_voting(self, splits: int = 1, scoring: str = 'accuracy') -> pd.DataFrame:
-        return self._get_scores(self, splits=splits, tiebreak=1, scoring=scoring, probs=True)
+        return self._get_scores(splits=splits, tiebreak=1, scoring=scoring, probs=True)
 
     def _get_scores(self, splits: int = 1, tiebreak: int = 1, scoring: str = 'accuracy', probs: bool = False) -> pd.DataFrame:
         if scoring not in ['accuracy', 'roc_auc', 'f1']:
@@ -56,20 +56,23 @@ class ModelComparer:
         self._scorer = self._scorer_map[scoring]
         # First check that the predictions and y_true all have the same length
         self._check_input_lengths(probs=probs)
+        preds = self.probs if probs else self.predictions
         # Get all combinations of the different models
-        s = list(range(len(self.probs))) if probs else list(range(len(self.predictions)))
-        combs = chain.from_iterable(combinations(s + 1, r) for r in range(len(s)))
+        s = list(range(len(preds)))
+    
+        combs = chain.from_iterable([combinations(s, r + 1) for r in range(len(s))])
         cols = ['Model(s) used', 'Full score']
         if splits > 1:
             cols += ['Fold ' + str(i) for i in range(splits)]
         score_df = pd.DataFrame(columns=cols)
         for comb in combs:
-            names = ', '.join([self.predictions[i][0] for i in comb])
+            names = ', '.join([preds[i][0] for i in comb])
             row = [names]
             comp_pred = []
-            for j in len(self.y_true):
-                score = np.sum([self.predictions[i][0][j] for i in comb]) / len(comb)
-                comp_pred.append(tiebreak if score == .5 else (score * 2) // 1)
+            for j in range(len(self.y_true)):
+                n = 2 if probs else 1
+                score = np.sum([preds[i][1][j] * n for i in comb]) / len(comb)
+                comp_pred.append(tiebreak if score == .5 else score // 1)
             row.append(self._scorer(self.y_true, comp_pred))
             if splits > 1:
                 for i in range(splits):
@@ -80,7 +83,7 @@ class ModelComparer:
                     y_comp_split = [comp_pred[splits * j + i] for j in range(split_length)]
                     row.append(self._scorer(y_true_split, y_comp_split))
             score_df.loc[len(score_df.index)] = row
-        return score_df.sort_values(by=['Full score'])
+        return score_df.sort_values(by=['Full score'], ascending=False)
             
                 
 
@@ -101,7 +104,7 @@ class ModelComparer:
         if len(self.y_true) == 0:
             raise ValueError('"y_true" must have non zero length')
         preds = self.probs if probs else self.predictions
-        if len(pred) == 0:
+        if len(preds) == 0:
             raise ValueError('at least one set of predictions or prabilities is required')
         for name, pred in preds:
             if len(pred) != len(self.y_true):
